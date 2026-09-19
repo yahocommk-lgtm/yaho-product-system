@@ -25,6 +25,8 @@ if menu == "상품 등록":
         weight = st.number_input("중량 (kg)", min_value=0.0, step=0.1)
         price = st.number_input("한국 판매가격 (원)", min_value=0, step=1000)
         photos = st.file_uploader("상품 사진 업로드", type=["jpg","jpeg","png","webp"], accept_multiple_files=True)
+        if photos:
+            st.image([p.getvalue() for p in photos], width=100)
 
     st.divider()
     st.subheader("② AI 상세페이지 초안")
@@ -48,17 +50,19 @@ if menu == "상품 등록":
         for k, v in draft.items():
             edited[k] = st.text_area(k, v, key=f"edit_{k}")
         if st.button("✅ 상품 저장"):
+            photo_bytes = [p.getvalue() for p in (photos or [])]
             st.session_state.products.append({
                 "상품번호": sku,
                 "상품명": edited["상품명"],
                 "원가(RMB)": cost,
                 "판매가(원)": price,
                 "옵션": edited["옵션"],
-                "사진수": len(photos or []),
+                "사진수": len(photo_bytes),
                 "상태": "검수완료",
                 "등록일": datetime.now().strftime("%Y-%m-%d %H:%M")
             })
             st.session_state.last_detail = edited
+            st.session_state.last_detail_photos = photo_bytes
             st.success("상품이 저장되었습니다.")
 
 elif menu == "상품 관리":
@@ -75,6 +79,10 @@ elif menu == "상세페이지 미리보기":
     detail = st.session_state.get("last_detail")
     if detail:
         st.markdown(f"# {detail['상품명']}")
+        photos_data = st.session_state.get("last_detail_photos")
+        if photos_data:
+            st.markdown("## 상품 사진")
+            st.image(photos_data, width=220)
         st.markdown("## 주요 특징")
         st.write(detail["핵심특징"])
         st.markdown("## 상품 설명")
@@ -85,3 +93,4 @@ elif menu == "상세페이지 미리보기":
         st.write(detail["주의사항"])
     else:
         st.info("상품 등록에서 상세페이지 초안을 먼저 만들어주세요.")
+

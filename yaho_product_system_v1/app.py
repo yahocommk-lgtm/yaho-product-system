@@ -1,6 +1,9 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 from datetime import datetime
+from io import BytesIO
+import base64
 import pandas as pd
 
 st.set_page_config(page_title="야호배대지 상품 자동화", page_icon="📦", layout="wide")
@@ -59,6 +62,118 @@ def build_detail_draft(name_cn: str, cost: float, price: int, weight: float, opt
         "주의사항": caution,
     }
 
+
+def _photo_to_data_uri(raw: bytes, max_width: int = 1200) -> str:
+    img = Image.open(BytesIO(raw)).convert("RGB")
+    if img.width > max_width:
+        ratio = max_width / img.width
+        img = img.resize((max_width, int(img.height * ratio)))
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def build_detail_body_html(detail: dict, photo_bytes: list) -> str:
+    """상세페이지 본문(스타일 포함, <body> 내부에 넣을 조각)을 만든다."""
+    photos_uri = [_photo_to_data_uri(b) for b in (photo_bytes or [])]
+    hero_photo = photos_uri[0] if photos_uri else None
+    gallery_photos = photos_uri[1:]
+
+    features = [f.lstrip("‣ ").strip() for f in detail.get("핵심특징", "").split("\n\n") if f.strip()]
+    feature_html = "".join(
+        f'<div class="ydp-feature"><span class="ydp-num">{i+1}</span><p>{f}</p></div>'
+        for i, f in enumerate(features)
+    )
+
+    spec_lines = [s.lstrip("‣ ").strip() for s in detail.get("스펙", "").split("\n\n") if s.strip()]
+    spec_html = ""
+    for s in spec_lines:
+        if ":" in s:
+            k, v = s.split(":", 1)
+            spec_html += f'<div class="ydp-spec-row"><span>{k.strip()}</span><strong>{v.strip()}</strong></div>'
+        else:
+            spec_html += f'<div class="ydp-spec-row"><span>{s}</span></div>'
+
+    gallery_html = "".join(f'<img src="{g}" class="ydp-gallery-img" />' for g in gallery_photos)
+
+    hero_html = (
+        f'<img src="{hero_photo}" style="width:100%;display:block;" />'
+        if hero_photo
+        else '<div style="width:100%;height:320px;background:#e9e9e9;display:flex;align-items:center;justify-content:center;color:#999;font-size:14px;">사진을 업로드하면 여기에 표시됩니다</div>'
+    )
+
+    return f"""
+<div class="ydp-wrap">
+  <div style="position:relative;">
+    {hero_html}
+    <div class="ydp-hero-caption">
+      <div class="ydp-eyebrow">NEW ARRIVAL</div>
+      <div class="ydp-title">{detail['상품명']}</div>
+    </div>
+  </div>
+
+  <div class="ydp-section" style="text-align:center;">
+    <div class="ydp-eyebrow" style="color:#c9a24b;">WHY THIS PRODUCT</div>
+    <p class="ydp-desc">{detail['상세설명']}</p>
+  </div>
+
+  <div class="ydp-section">
+    {feature_html}
+  </div>
+
+  {f'<div class="ydp-gallery">{gallery_html}</div>' if gallery_html else ''}
+
+  <div class="ydp-section ydp-spec-section">
+    <div class="ydp-eyebrow" style="color:#c9a24b; text-align:center;">SPEC</div>
+    {spec_html}
+  </div>
+
+  <div class="ydp-section ydp-option">
+    <div class="ydp-eyebrow" style="color:#1f2a47;">OPTION</div>
+    <p>{detail['옵션']}</p>
+  </div>
+
+  <div class="ydp-caution">
+    {detail['주의사항']}
+  </div>
+</div>
+<style>
+  .ydp-wrap {{ font-family:'Noto Sans KR', 'Malgun Gothic', sans-serif; max-width:720px; margin:0 auto; background:#fff; color:#222; border:1px solid #eee; }}
+  .ydp-hero-caption {{ position:absolute; left:0; right:0; bottom:0; padding:28px 24px; background:linear-gradient(transparent, rgba(0,0,0,0.78)); color:#fff; }}
+  .ydp-eyebrow {{ font-size:12px; letter-spacing:2px; opacity:.9; margin-bottom:8px; font-weight:700; }}
+  .ydp-title {{ font-size:24px; font-weight:700; line-height:1.4; }}
+  .ydp-section {{ padding:36px 24px; }}
+  .ydp-desc {{ font-size:15px; line-height:1.85; color:#444; margin-top:10px; }}
+  .ydp-feature {{ display:flex; align-items:flex-start; gap:14px; padding:14px 0; border-bottom:1px solid #f1f1f1; }}
+  .ydp-num {{ flex-shrink:0; width:26px; height:26px; border-radius:50%; background:#1f2a47; color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; margin-top:2px; }}
+  .ydp-feature p {{ margin:0; font-size:14.5px; line-height:1.6; color:#333; }}
+  .ydp-gallery {{ display:grid; grid-template-columns:1fr 1fr; gap:4px; }}
+  .ydp-gallery-img {{ width:100%; display:block; object-fit:cover; }}
+  .ydp-spec-section {{ background:#faf9f7; }}
+  .ydp-spec-row {{ display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px dashed #ddd; font-size:14px; }}
+  .ydp-spec-row span {{ color:#888; }}
+  .ydp-spec-row strong {{ color:#222; }}
+  .ydp-option p {{ font-size:14px; color:#333; margin-top:8px; }}
+  .ydp-caution {{ padding:24px; font-size:12px; color:#999; line-height:1.7; border-top:1px solid #eee; }}
+</style>
+"""
+
+
+def build_detail_full_html(detail: dict, photo_bytes: list) -> str:
+    """다운로드용 완전한 HTML 문서."""
+    body = build_detail_body_html(detail, photo_bytes)
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>{detail.get('상품명','상세페이지')}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+<body style="margin:0; padding:20px; background:#f4f4f4;">
+{body}
+</body>
+</html>"""
+
 if "products" not in st.session_state:
     st.session_state.products = []
 
@@ -111,6 +226,7 @@ if menu == "상품 등록":
             })
             st.session_state.last_detail = edited
             st.session_state.last_detail_photos = photo_bytes
+            st.session_state.last_detail_sku = sku
             st.success("상품이 저장되었습니다.")
 
 elif menu == "상품 관리":
@@ -126,22 +242,23 @@ elif menu == "상세페이지 미리보기":
     st.header("상세페이지 미리보기")
     detail = st.session_state.get("last_detail")
     if detail:
-        st.markdown(f"# {detail['상품명']}")
         photos_data = st.session_state.get("last_detail_photos")
-        if photos_data:
-            st.markdown("## 상품 사진")
-            st.image(photos_data, width=220)
-        st.markdown("## 주요 특징")
-        st.write(detail["핵심특징"])
-        st.markdown("## 상품 설명")
-        st.write(detail["상세설명"])
-        if detail.get("스펙"):
-            st.markdown("## 스펙")
-            st.write(detail["스펙"])
-        st.markdown("## 옵션")
-        st.write(detail["옵션"])
-        st.markdown("## 구매 전 확인")
-        st.write(detail["주의사항"])
-    else:
-        st.info("상품 등록에서 상세페이지 초안을 먼저 만들어주세요.")
+        sku_saved = st.session_state.get("last_detail_sku", "product")
 
+        body_html = build_detail_body_html(detail, photos_data)
+        components.html(
+            f'<div style="background:#f4f4f4; padding:20px 0;">{body_html}</div>',
+            height=1600,
+            scrolling=True,
+        )
+
+        full_html = build_detail_full_html(detail, photos_data)
+        st.download_button(
+            "📥 상세페이지 HTML 다운로드",
+            data=full_html.encode("utf-8"),
+            file_name=f"{sku_saved}_상세페이지.html",
+            mime="text/html",
+        )
+        st.caption("다운로드한 HTML 파일을 네이버 스마트스토어·쿠팡 등 판매 채널의 상세설명 등록란에 그대로 붙여넣거나 첨부하시면 됩니다.")
+    else:
+        st.info("상품 등록에서 상세페이지를 먼저 만들어주세요.")

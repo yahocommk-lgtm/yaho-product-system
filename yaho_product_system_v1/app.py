@@ -178,7 +178,7 @@ if "products" not in st.session_state:
     st.session_state.products = []
 
 st.title("📦 야호배대지 상품 자동화 시스템")
-st.caption("촬영 → 상품정보 → 상세페이지 초안 → 검수 → 판매등록 준비")
+st.caption("사진 업로드 → 기획·카피 자동완성 → 확인/수정 → 완성 → 네이버·쿠팡 등록용 파일")
 
 menu = st.sidebar.radio("메뉴", ["상품 등록", "상품 관리", "상세페이지 미리보기"])
 
@@ -198,41 +198,63 @@ if menu == "상품 등록":
             st.image([p.getvalue() for p in photos], width=100)
 
     st.divider()
-    st.subheader("② 상세페이지 완성본 만들기")
+    st.subheader("② 상세페이지 기획·카피 자동완성")
+    st.caption("상품명과 사진만 있으면 기획 문구·카피가 자동으로 만들어집니다.")
     if st.button("✨ 상세페이지 완성본 만들기", type="primary"):
         if not name_cn:
             st.warning("중국 상품명을 먼저 입력해주세요.")
         else:
             st.session_state.draft = build_detail_draft(name_cn, cost, price, weight, option)
-            st.success("입력하신 상품정보를 바탕으로 상세페이지 내용이 완성되었습니다. 그대로 등록하셔도 되고, 아래에서 다듬으셔도 됩니다.")
+            st.session_state.draft_photos = [p.getvalue() for p in (photos or [])]
+            st.session_state.draft_version = st.session_state.get("draft_version", 0) + 1
+            st.success("사진과 상품정보를 바탕으로 기획·카피가 완성되었습니다. 아래에서 사진과 함께 바로 확인하고 다듬으세요.")
 
     draft = st.session_state.get("draft")
+    draft_photos = st.session_state.get("draft_photos")
     if draft:
-        st.subheader("③ 직원 검수")
-        edited = {}
-        for k, v in draft.items():
-            edited[k] = st.text_area(k, v, key=f"edit_{k}")
-        if st.button("✅ 상품 저장"):
-            photo_bytes = [p.getvalue() for p in (photos or [])]
+        st.divider()
+        st.subheader("③ 사진 + 카피 확인 및 수정")
+        edit_col, preview_col = st.columns([1, 1.3])
+        with edit_col:
+            edited = {}
+            for k, v in draft.items():
+                edited[k] = st.text_area(k, v, key=f"edit_{k}_{st.session_state.draft_version}")
+        with preview_col:
+            st.caption("실제 상세페이지에 이렇게 표시됩니다 (수정하면 바로 반영돼요)")
+            body_html = build_detail_body_html(edited, draft_photos)
+            components.html(
+                f'<div style="background:#f4f4f4; padding:12px 0;">{body_html}</div>',
+                height=900,
+                scrolling=True,
+            )
+
+        st.divider()
+        st.subheader("④ 완성")
+        if st.button("✅ 완성 저장 (네이버·쿠팡 등록 준비)", type="primary"):
             st.session_state.products.append({
                 "상품번호": sku,
                 "상품명": edited["상품명"],
                 "원가(RMB)": cost,
                 "판매가(원)": price,
                 "옵션": edited["옵션"],
-                "사진수": len(photo_bytes),
-                "상태": "검수완료",
-                "등록일": datetime.now().strftime("%Y-%m-%d %H:%M")
+                "사진수": len(draft_photos or []),
+                "상태": "완성",
+                "등록일": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "_detail": edited,
+                "_photos": draft_photos,
             })
             st.session_state.last_detail = edited
-            st.session_state.last_detail_photos = photo_bytes
+            st.session_state.last_detail_photos = draft_photos
             st.session_state.last_detail_sku = sku
-            st.success("상품이 저장되었습니다.")
+            st.session_state.draft = None
+            st.session_state.draft_photos = None
+            st.success("상품이 완성되어 저장되었습니다. 왼쪽 메뉴의 '상세페이지 미리보기'에서 HTML을 다운로드해 네이버·쿠팡에 등록하세요.")
 
 elif menu == "상품 관리":
     st.header("상품 관리")
     if st.session_state.products:
-        df = pd.DataFrame(st.session_state.products)
+        display_rows = [{k: v for k, v in p.items() if not k.startswith("_")} for p in st.session_state.products]
+        df = pd.DataFrame(display_rows)
         st.dataframe(df, use_container_width=True, hide_index=True)
         st.info("다음 개발 단계에서 네이버·쿠팡 API를 연결해 '판매채널 등록' 버튼으로 자동 등록할 수 있습니다.")
     else:
@@ -240,10 +262,14 @@ elif menu == "상품 관리":
 
 elif menu == "상세페이지 미리보기":
     st.header("상세페이지 미리보기")
-    detail = st.session_state.get("last_detail")
-    if detail:
-        photos_data = st.session_state.get("last_detail_photos")
-        sku_saved = st.session_state.get("last_detail_sku", "product")
+    saved = [p for p in st.session_state.products if "_detail" in p]
+    if saved:
+        options = [f"{p['상품번호']} · {p['상품명']}" for p in saved]
+        idx = st.selectbox("상품 선택", range(len(options)), format_func=lambda i: options[i], index=len(options) - 1)
+        chosen = saved[idx]
+        detail = chosen["_detail"]
+        photos_data = chosen["_photos"]
+        sku_saved = chosen["상품번호"]
 
         body_html = build_detail_body_html(detail, photos_data)
         components.html(
@@ -261,4 +287,4 @@ elif menu == "상세페이지 미리보기":
         )
         st.caption("다운로드한 HTML 파일을 네이버 스마트스토어·쿠팡 등 판매 채널의 상세설명 등록란에 그대로 붙여넣거나 첨부하시면 됩니다.")
     else:
-        st.info("상품 등록에서 상세페이지를 먼저 만들어주세요.")
+        st.info("상품 등록에서 상세페이지를 먼저 완성해주세요.")
